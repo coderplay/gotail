@@ -24,7 +24,7 @@ type LogTopic struct {
 
 type Config struct {
   checkpointPath string
-  topics         []LogTopic
+  topics         []*LogTopic
 }
 
 const (
@@ -38,6 +38,7 @@ checkpoint_name=%s`
 )
 
 func (item *LogTopic) String() string {
+  fmt.Println(item.topic)
   return fmt.Sprintf(
     formatStr,
     item.topic,
@@ -64,7 +65,7 @@ func ParseFromIni(path string) (*Config, error) {
   }
 
   // get topics from dict
-  topics := make([]LogTopic, 1)
+  topics := make([]*LogTopic, 0)
   for k, v := range dict {
     if strings.HasPrefix(k, "topic_") {
       topic, present := v["topic"]
@@ -112,8 +113,7 @@ func ParseFromIni(path string) (*Config, error) {
 
       logTopic := &LogTopic{topic, logBasePath, logFilePattern,
         encoding, compressed, timeout, checkpointName}
-      fmt.Println(logTopic.String())
-      topics = append(topics, *logTopic)
+      topics = append(topics, logTopic)
     }
   }
 
