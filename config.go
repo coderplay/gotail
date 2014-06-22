@@ -38,7 +38,6 @@ checkpoint_name=%s`
 )
 
 func (item *LogTopic) String() string {
-  fmt.Println(item.topic)
   return fmt.Sprintf(
     formatStr,
     item.topic,

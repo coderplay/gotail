@@ -2,7 +2,7 @@ package main
 
 import (
   "flag"
-  "log"
+  "github.com/golang/glog"
 
   "bufio"
   "errors"
@@ -11,47 +11,69 @@ import (
   "io"
   "os"
   "os/signal"
+  "path"
   "time"
 )
 
 func tail(checkpointPath string, topic *LogTopic, watcher *fsnotify.Watcher) {
-  checkpoint := &CheckPoint{}
+  cpFile, err := OpenCheckPointFile(path.Join(checkpointPath, topic.checkpointName))
+  if err != nil {
+    glog.Fatal(err)
+    os.Exit(4)
+  }
+  defer cpFile.Close()
+  checkpoint, err := cpFile.Retrieve()
+  if err != nil {
+    glog.Fatal("checkpoint Error")
+  }
+
   for {
     select {
     case ev := <-watcher.Event:
       if ev.IsCreate() || (ev.IsModify() && !ev.IsAttrib()) {
-        f, err := os.Open(ev.Name)
+        file, err := os.Open(ev.Name)
+
         if err != nil {
-          log.Fatal("Error")
+          glog.Fatal(err)
         }
-        defer f.Close()
-        r := bufio.NewReader(f)
+        defer file.Close()
+
+        if ev.Name == checkpoint.FileName {
+          file.Seek(checkpoint.Position, 0)
+        }
+        r := bufio.NewReader(file)
         line, isPrefix, err := r.ReadLine()
         for err == nil && !isPrefix {
           s := string(line)
           fmt.Println(s)
+          if checkpoint.Position, err = file.Seek(0, os.SEEK_CUR); err != nil {
+            glog.Error(err)
+          }
+          checkpoint.FileName = ev.Name
+          cpFile.Save(checkpoint)
           line, isPrefix, err = r.ReadLine()
         }
         if isPrefix {
-          fmt.Println(errors.New("buffer size to small"))
+          glog.Error(errors.New("buffer size to small"))
           return
         }
         if err != io.EOF {
-          fmt.Println(err)
+          glog.Error(err)
           return
         }
         time.Sleep(time.Second)
       }
     case err := <-watcher.Error:
-      log.Println("error:", err)
+      glog.Fatal(err)
     }
   }
 }
 
 /**
+ * Gotail works following the steps below
  * 1. read config file
- * 2. each group use one goroutine and one channel
- * 3. each coroutine do : watch dir event and consume the event, send
+ * 2. assign one watcher to each topic
+ * 3. each goroutine do : consume dir event and then send it to kafka
  */
 func main() {
   // parse config file path from command line
@@ -61,7 +83,8 @@ func main() {
   // read config file, the config file is ini format
   config, err := ParseFromIni(*configFilePtr)
   if err != nil {
-    log.Fatal(err)
+    glog.Fatal(err)
+    os.Exit(1)
   }
 
   interrupt := make(chan os.Signal, 1)
@@ -71,12 +94,14 @@ func main() {
   for _, topic := range topics {
     watcher, err := fsnotify.NewWatcher()
     if err != nil {
-      log.Fatal(err)
+      glog.Fatal(err)
+      os.Exit(2)
     }
 
     err = watcher.Watch(topic.logBasePath)
     if err != nil {
-      log.Fatal(err)
+      glog.Fatal(err)
+      os.Exit(3)
     }
 
     go tail(config.checkpointPath, topic, watcher)
